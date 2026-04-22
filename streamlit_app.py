@@ -4,284 +4,176 @@ import sqlite3
 
 import streamlit as st
 import altair as alt
+import pymysql
 import pandas as pd
 
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title="Inventory tracker",
-    page_icon=":shopping_bags:",  # This is an emoji shortcode. Could be a URL too.
-)
 
+# Database Connection Configuration
+DB_NAME = 'DrugTrackingSystem'
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.set_page_config(page_title="Drug Tracking System", layout="wide", page_icon="💊")
+st.title("💊 Drug Tracking System Dashboard")
 
+st.sidebar.header("Database Connection settings")
+db_host = st.sidebar.text_input("Host", value="localhost")
+db_user = st.sidebar.text_input("User", value="root")
+db_password = st.sidebar.text_input("Password", type="password", help="Leave blank if your user has no password")
 
-def connect_db():
-    """Connects to the sqlite database."""
-
-    DB_FILENAME = Path(__file__).parent / "inventory.db"
-    db_already_exists = DB_FILENAME.exists()
-
-    conn = sqlite3.connect(DB_FILENAME)
-    db_was_just_created = not db_already_exists
-
-    return conn, db_was_just_created
-
-
-def initialize_data(conn):
-    """Initializes the inventory table with some data."""
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS inventory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_name TEXT,
-            price REAL,
-            units_sold INTEGER,
-            units_left INTEGER,
-            cost_price REAL,
-            reorder_point INTEGER,
-            description TEXT
-        )
-        """
-    )
-
-    cursor.execute(
-        """
-        INSERT INTO inventory
-            (item_name, price, units_sold, units_left, cost_price, reorder_point, description)
-        VALUES
-            -- Beverages
-            ('Bottled Water (500ml)', 1.50, 115, 15, 0.80, 16, 'Hydrating bottled water'),
-            ('Soda (355ml)', 2.00, 93, 8, 1.20, 10, 'Carbonated soft drink'),
-            ('Energy Drink (250ml)', 2.50, 12, 18, 1.50, 8, 'High-caffeine energy drink'),
-            ('Coffee (hot, large)', 2.75, 11, 14, 1.80, 5, 'Freshly brewed hot coffee'),
-            ('Juice (200ml)', 2.25, 11, 9, 1.30, 5, 'Fruit juice blend'),
-
-            -- Snacks
-            ('Potato Chips (small)', 2.00, 34, 16, 1.00, 10, 'Salted and crispy potato chips'),
-            ('Candy Bar', 1.50, 6, 19, 0.80, 15, 'Chocolate and candy bar'),
-            ('Granola Bar', 2.25, 3, 12, 1.30, 8, 'Healthy and nutritious granola bar'),
-            ('Cookies (pack of 6)', 2.50, 8, 8, 1.50, 5, 'Soft and chewy cookies'),
-            ('Fruit Snack Pack', 1.75, 5, 10, 1.00, 8, 'Assortment of dried fruits and nuts'),
-
-            -- Personal Care
-            ('Toothpaste', 3.50, 1, 9, 2.00, 5, 'Minty toothpaste for oral hygiene'),
-            ('Hand Sanitizer (small)', 2.00, 2, 13, 1.20, 8, 'Small sanitizer bottle for on-the-go'),
-            ('Pain Relievers (pack)', 5.00, 1, 5, 3.00, 3, 'Over-the-counter pain relief medication'),
-            ('Bandages (box)', 3.00, 0, 10, 2.00, 5, 'Box of adhesive bandages for minor cuts'),
-            ('Sunscreen (small)', 5.50, 6, 5, 3.50, 3, 'Small bottle of sunscreen for sun protection'),
-
-            -- Household
-            ('Batteries (AA, pack of 4)', 4.00, 1, 5, 2.50, 3, 'Pack of 4 AA batteries'),
-            ('Light Bulbs (LED, 2-pack)', 6.00, 3, 3, 4.00, 2, 'Energy-efficient LED light bulbs'),
-            ('Trash Bags (small, 10-pack)', 3.00, 5, 10, 2.00, 5, 'Small trash bags for everyday use'),
-            ('Paper Towels (single roll)', 2.50, 3, 8, 1.50, 5, 'Single roll of paper towels'),
-            ('Multi-Surface Cleaner', 4.50, 2, 5, 3.00, 3, 'All-purpose cleaning spray'),
-
-            -- Others
-            ('Lottery Tickets', 2.00, 17, 20, 1.50, 10, 'Assorted lottery tickets'),
-            ('Newspaper', 1.50, 22, 20, 1.00, 5, 'Daily newspaper')
-        """
-    )
-    conn.commit()
-
-
-def load_data(conn):
-    """Loads the inventory data from the database."""
-    cursor = conn.cursor()
-
+def get_connection():
     try:
-        cursor.execute("SELECT * FROM inventory")
-        data = cursor.fetchall()
-    except:
+        return pymysql.connect(
+            host=db_host,
+            user=db_user,
+            password=db_password,
+            database=DB_NAME,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+    except pymysql.err.OperationalError as e:
+        code, msg = e.args
+        st.error(f"MySQL Error {code}: {msg}")
+        st.info("Tip: If you're getting 'Access denied' and 'using password: NO', it means your database account requires a password but the password field is left empty. Conversely, if it says 'using password: YES', it means the password you provided is incorrect.")
+        return None
+    except Exception as e:
+        st.error(f"Failed to connect to database: {e}")
         return None
 
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "id",
-            "item_name",
-            "price",
-            "units_sold",
-            "units_left",
-            "cost_price",
-            "reorder_point",
-            "description",
-        ],
-    )
+menu = ["Dashboard", "Manage Drugs", "Manage Patients", "Record Purchase", "Purchase History"]
+choice = st.sidebar.selectbox("Navigation", menu)
 
-    return df
+if choice == "Dashboard":
+    st.subheader("System Overview")
+    conn = get_connection()
+    if conn:
+        cursor = conn.cursor()
+        
+        col1, col2, col3 = st.columns(3)
+        
+        cursor.execute("SELECT COUNT(*) as count FROM Drugs")
+        drug_count = cursor.fetchone()['count']
+        col1.metric("Total Drugs in Catalog", drug_count)
+        
+        cursor.execute("SELECT COUNT(*) as count FROM Patients")
+        patient_count = cursor.fetchone()['count']
+        col2.metric("Total Patients", patient_count)
+        
+        cursor.execute("SELECT COUNT(*) as count FROM Purchases")
+        purchase_count = cursor.fetchone()['count']
+        col3.metric("Total Purchases", purchase_count)
+        
+        conn.close()
+        
+elif choice == "Manage Drugs":
+    st.subheader("Medicine Catalog")
+    conn = get_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM Drugs")
+        df = pd.DataFrame(cursor.fetchall())
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No drugs found in database.")
+        
+        st.markdown("---")
+        st.subheader("Add New Drug")
+        with st.form("add_drug_form"):
+            new_name = st.text_input("Drug Name")
+            new_price = st.number_input("Price", min_value=0.0, format="%.2f")
+            new_stock = st.number_input("Initial Stock", min_value=0, step=1)
+            new_exp = st.date_input("Expiration Date")
+            submit = st.form_submit_button("Add Drug")
+            
+            if submit:
+                try:
+                    cursor.callproc('AddDrug', (new_name, new_price, new_stock, new_exp))
+                    conn.commit()
+                    st.success(f"Successfully added {new_name}!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error adding drug: {e}")
+        conn.close()
 
+elif choice == "Manage Patients":
+    st.subheader("Registered Patients")
+    conn = get_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM Patients")
+        df = pd.DataFrame(cursor.fetchall())
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No patients found in database.")
+            
+        st.markdown("---")
+        st.subheader("Register New Patient")
+        with st.form("add_patient_form"):
+            p_name = st.text_input("Patient Name")
+            p_age = st.number_input("Age", min_value=0, step=1)
+            p_symp = st.text_area("Symptoms")
+            submit = st.form_submit_button("Register Patient")
+            
+            if submit:
+                try:
+                    cursor.execute("INSERT INTO Patients (name, age, symptoms) VALUES (%s, %s, %s)", (p_name, p_age, p_symp))
+                    conn.commit()
+                    st.success(f"Successfully registered {p_name}!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error registering patient: {e}")
+        conn.close()
 
-def update_data(conn, df, changes):
-    """Updates the inventory data in the database."""
-    cursor = conn.cursor()
+elif choice == "Record Purchase":
+    st.subheader("Record a New Purchase")
+    conn = get_connection()
+    if conn:
+        cursor = conn.cursor()
+        # Get patients
+        cursor.execute("SELECT patient_id, name FROM Patients")
+        patients = cursor.fetchall()
+        
+        # Get drugs
+        cursor.execute("SELECT drug_id, name, stock_level, price FROM Drugs WHERE stock_level > 0")
+        drugs = cursor.fetchall()
+        
+        if not patients:
+            st.warning("Please register a patient first.")
+        elif not drugs:
+            st.warning("No available drugs in stock.")
+        else:
+            p_options = {f"{p['patient_id']} - {p['name']}": p['patient_id'] for p in patients}
+            d_options = {f"{d['drug_id']} - {d['name']} (Stock: {d['stock_level']}, Price: {d['price']})": d['drug_id'] for d in drugs}
+            
+            with st.form("record_purchase_form"):
+                selected_patient = st.selectbox("Select Patient", options=list(p_options.keys()))
+                selected_drug = st.selectbox("Select Drug", options=list(d_options.keys()))
+                symptoms = st.text_area("Symptoms (Optional)")
+                submit = st.form_submit_button("Record Purchase")
+                
+                if submit:
+                    try:
+                        p_id = p_options[selected_patient]
+                        d_id = d_options[selected_drug]
+                        cursor.callproc('RecordPurchase', (p_id, d_id, symptoms))
+                        conn.commit()
+                        st.success("Purchase recorded successfully!")
+                    except Exception as e:
+                        st.error(f"Error recording purchase: {e}")
+        conn.close()
 
-    if changes["edited_rows"]:
-        deltas = st.session_state.inventory_table["edited_rows"]
-        rows = []
-
-        for i, delta in deltas.items():
-            row_dict = df.iloc[i].to_dict()
-            row_dict.update(delta)
-            rows.append(row_dict)
-
-        cursor.executemany(
-            """
-            UPDATE inventory
-            SET
-                item_name = :item_name,
-                price = :price,
-                units_sold = :units_sold,
-                units_left = :units_left,
-                cost_price = :cost_price,
-                reorder_point = :reorder_point,
-                description = :description
-            WHERE id = :id
-            """,
-            rows,
-        )
-
-    if changes["added_rows"]:
-        cursor.executemany(
-            """
-            INSERT INTO inventory
-                (id, item_name, price, units_sold, units_left, cost_price, reorder_point, description)
-            VALUES
-                (:id, :item_name, :price, :units_sold, :units_left, :cost_price, :reorder_point, :description)
-            """,
-            (defaultdict(lambda: None, row) for row in changes["added_rows"]),
-        )
-
-    if changes["deleted_rows"]:
-        cursor.executemany(
-            "DELETE FROM inventory WHERE id = :id",
-            ({"id": int(df.loc[i, "id"])} for i in changes["deleted_rows"]),
-        )
-
-    conn.commit()
-
-
-# -----------------------------------------------------------------------------
-# Draw the actual page, starting with the inventory table.
-
-# Set the title that appears at the top of the page.
-"""
-# :shopping_bags: Inventory tracker
-
-**Welcome to Alice's Corner Store's intentory tracker!**
-This page reads and writes directly from/to our inventory database.
-"""
-
-st.info(
-    """
-    Use the table below to add, remove, and edit items.
-    And don't forget to commit your changes when you're done.
-    """
-)
-
-# Connect to database and create table if needed
-conn, db_was_just_created = connect_db()
-
-# Initialize data.
-if db_was_just_created:
-    initialize_data(conn)
-    st.toast("Database initialized with some sample data.")
-
-# Load data from database
-df = load_data(conn)
-
-# Display data with editable table
-edited_df = st.data_editor(
-    df,
-    disabled=["id"],  # Don't allow editing the 'id' column.
-    num_rows="dynamic",  # Allow appending/deleting rows.
-    column_config={
-        # Show dollar sign before price columns.
-        "price": st.column_config.NumberColumn(format="$%.2f"),
-        "cost_price": st.column_config.NumberColumn(format="$%.2f"),
-    },
-    key="inventory_table",
-)
-
-has_uncommitted_changes = any(len(v) for v in st.session_state.inventory_table.values())
-
-st.button(
-    "Commit changes",
-    type="primary",
-    disabled=not has_uncommitted_changes,
-    # Update data in database
-    on_click=update_data,
-    args=(conn, df, st.session_state.inventory_table),
-)
-
-
-# -----------------------------------------------------------------------------
-# Now some cool charts
-
-# Add some space
-""
-""
-""
-
-st.subheader("Units left", divider="red")
-
-need_to_reorder = df[df["units_left"] < df["reorder_point"]].loc[:, "item_name"]
-
-if len(need_to_reorder) > 0:
-    items = "\n".join(f"* {name}" for name in need_to_reorder)
-
-    st.error(f"We're running dangerously low on the items below:\n {items}")
-
-""
-""
-
-st.altair_chart(
-    # Layer 1: Bar chart.
-    alt.Chart(df)
-    .mark_bar(
-        orient="horizontal",
-    )
-    .encode(
-        x="units_left",
-        y="item_name",
-    )
-    # Layer 2: Chart showing the reorder point.
-    + alt.Chart(df)
-    .mark_point(
-        shape="diamond",
-        filled=True,
-        size=50,
-        color="salmon",
-        opacity=1,
-    )
-    .encode(
-        x="reorder_point",
-        y="item_name",
-    ),
-    use_container_width=True,
-)
-
-st.caption("NOTE: The :diamonds: location shows the reorder point.")
-
-""
-""
-""
-
-# -----------------------------------------------------------------------------
-
-st.subheader("Best sellers", divider="orange")
-
-""
-""
-
-st.altair_chart(
-    alt.Chart(df)
-    .mark_bar(orient="horizontal")
+elif choice == "Purchase History":
+    st.subheader("Purchase History")
+    conn = get_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM vw_purchase_history ORDER BY purchase_date DESC")
+        df = pd.DataFrame(cursor.fetchall())
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No purchases recorded yet.")
+        conn.close()
     .encode(
         x="units_sold",
         y=alt.Y("item_name").sort("-x"),
