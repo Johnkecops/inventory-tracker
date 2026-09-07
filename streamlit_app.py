@@ -4,20 +4,29 @@ import pandas as pd
 from datetime import datetime
 
 # Database Connection Configuration
-# Note: Users should update these credentials to match their local MySQL setup
-DB_HOST = 'localhost'
-DB_USER = 'root'
-DB_PASSWORD = '' # Enter your database password
-DB_NAME = 'DrugTrackingSystem'
+# Credentials live in .streamlit/secrets.toml (gitignored) under a [mysql]
+# section. See secrets.toml.example. Falls back to a local dev server so the
+# app still starts without a secrets file.
+DB_DEFAULTS = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'DrugTrackingSystem',
+}
+
+def db_config():
+    """Return MySQL connection settings from secrets, with local dev fallbacks."""
+    try:
+        configured = dict(st.secrets['mysql'])
+    except Exception:
+        configured = {}
+    return {key: configured.get(key, default) for key, default in DB_DEFAULTS.items()}
 
 def get_connection():
     """Establish and return a connection to the database."""
     try:
         connection = pymysql.connect(
-            host=DB_HOST,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            database=DB_NAME,
+            **db_config(),
             cursorclass=pymysql.cursors.DictCursor
         )
         return connection
